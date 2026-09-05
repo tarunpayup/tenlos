@@ -1,0 +1,963 @@
+BACKEND IMPLEMENTATION PLAN
+Based on Your Frontend Structure
+1. FRONTEND STRUCTURE MAPPING
+Based on your folder structure, I have mapped each frontend component to the required backend APIs.
+
+1.1 Frontend → Backend Module Mapping
+Frontend View/Component	Backend Module	Priority
+DashboardView.tsx	Dashboard APIs	P0
+FinancialsView.tsx	Accounting APIs	P0
+InvoicingView.tsx	Invoicing + Peppol APIs	P0
+PeppolComplianceView.tsx	Peppol APIs	P0
+SalesView.tsx	Sales + CRM APIs	P0
+ProcurementView.tsx	Procurement APIs	P0
+ManufacturingView.tsx	Manufacturing APIs	P0
+LogisticsView.tsx	Logistics APIs	P1
+BankingView.tsx	Banking APIs	P0
+ReportingView.tsx	Reporting APIs	P0
+PrintStudioView.tsx	Document APIs	P1
+SettingsView.tsx	Settings APIs	P0
+CreateInvoiceModal.tsx	Invoice APIs	P0
+CreateJournalModal.tsx	Journal APIs	P0
+DrillDownModal.tsx	Accounting APIs	P0
+1.2 Frontend Data Structure Mapping
+Your frontend has defined these types in lib/types/erp.ts. The backend must match these structures:
+
+Frontend Type	Backend Model	Priority
+Account, JournalEntry, JournalLine, TrialBalanceRow	Accounting Models	P0
+Invoice, InvoiceItem, Customer, PaymentTerms	Invoicing Models	P0
+PeppolTransmission, PeppolParticipant	Peppol Models	P0
+BOMItem, WorkCenter, ProductionOrder, QualityInspection	Manufacturing Models	P0
+WarehouseLocation, StockTransfer, Carrier, Shipment	Logistics Models	P1
+Supplier, PurchaseOrder	Procurement Models	P0
+BankAccount, BankTransaction	Banking Models	P0
+2. BACKEND MODULES & API ENDPOINTS
+2.1 Dashboard APIs (P0)
+Frontend Components: DashboardView.tsx uses:
+
+KPI metric cards (revenue, net profit margin, cash balance, accounts receivable)
+
+Cash-flow and revenue trend charts
+
+Recent transaction feed
+
+Peppol invoice pipeline overview
+
+Endpoint	Method	Description	Response
+/api/dashboard/metrics	GET	KPI metrics for dashboard	{ revenue, profit, cash, receivables, payables }
+/api/dashboard/charts	GET	Chart data for trends	{ cashFlow: [], revenueTrend: [] }
+/api/dashboard/recent-transactions	GET	Recent 10 transactions	{ transactions: [] }
+/api/dashboard/peppol-pipeline	GET	Peppol invoice status summary	{ total, sent, pending, failed }
+2.2 Accounting APIs (P0)
+Frontend Components: FinancialsView.tsx, CreateJournalModal.tsx, DrillDownModal.tsx
+
+Models
+sql
+-- accounts
+CREATE TABLE accounts (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id UUID NOT NULL REFERENCES companies(id),
+    code VARCHAR(20) NOT NULL,
+    name VARCHAR(255) NOT NULL,
+    type VARCHAR(20) NOT NULL, -- asset, liability, equity, income, expense
+    category VARCHAR(50), -- current, fixed, etc.
+    parent_id UUID REFERENCES accounts(id),
+    is_active BOOLEAN DEFAULT TRUE,
+    currency_id UUID REFERENCES currencies(id),
+    balance DECIMAL(15,2) DEFAULT 0,
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW(),
+    UNIQUE(company_id, code)
+);
+
+-- journal_entries
+CREATE TABLE journal_entries (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id UUID NOT NULL REFERENCES companies(id),
+    reference VARCHAR(50) NOT NULL,
+    description TEXT,
+    date DATE NOT NULL,
+    period_id UUID REFERENCES fiscal_periods(id),
+    status VARCHAR(20) DEFAULT 'draft', -- draft, posted, reversed
+    created_by UUID REFERENCES users(id),
+    posted_by UUID REFERENCES users(id),
+    posted_at TIMESTAMP,
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+
+-- journal_lines
+CREATE TABLE journal_lines (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    journal_entry_id UUID NOT NULL REFERENCES journal_entries(id) ON DELETE CASCADE,
+    account_id UUID NOT NULL REFERENCES accounts(id),
+    debit DECIMAL(15,2) DEFAULT 0,
+    credit DECIMAL(15,2) DEFAULT 0,
+    description TEXT,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+API Endpoints
+Endpoint	Method	Description	Frontend Usage
+/api/accounts	GET	List accounts (tree view)	COA directory
+/api/accounts/{id}	GET	Single account with balance	Account detail
+/api/accounts	POST	Create account	Settings
+/api/accounts/{id}	PUT	Update account	Settings
+/api/journal-entries	GET	List with filters (date, status)	Journal register
+/api/journal-entries/{id}	GET	Single journal with lines	DrillDownModal
+/api/journal-entries	POST	Create with lines (debits=credits)	CreateJournalModal
+/api/journal-entries/{id}/post	POST	Post to ledger	FinancialsView
+/api/journal-entries/{id}/reverse	POST	Reverse entry	FinancialsView
+/api/trial-balance	GET	Trial balance report	FinancialsView
+/api/balance-sheet	GET	Balance sheet	ReportingView
+/api/profit-loss	GET	P&L statement	ReportingView
+/api/ledger/{account_id}	GET	Account ledger with drill-down	DrillDownModal
+2.3 Invoicing APIs (P0)
+Frontend Components: InvoicingView.tsx, CreateInvoiceModal.tsx
+
+Models
+sql
+-- customers
+CREATE TABLE customers (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id UUID NOT NULL REFERENCES companies(id),
+    name VARCHAR(255) NOT NULL,
+    email VARCHAR(255),
+    phone VARCHAR(50),
+    address TEXT,
+    tax_id VARCHAR(50), -- VAT/CBE number
+    peppol_id VARCHAR(100), -- Peppol participant ID
+    currency_id UUID REFERENCES currencies(id),
+    payment_terms INTEGER DEFAULT 30,
+    credit_limit DECIMAL(15,2),
+    outstanding_balance DECIMAL(15,2) DEFAULT 0,
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+
+-- invoices
+CREATE TABLE invoices (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id UUID NOT NULL REFERENCES companies(id),
+    invoice_number VARCHAR(50) NOT NULL UNIQUE,
+    customer_id UUID NOT NULL REFERENCES customers(id),
+    date DATE NOT NULL,
+    due_date DATE NOT NULL,
+    currency_id UUID REFERENCES currencies(id),
+    exchange_rate DECIMAL(15,6) DEFAULT 1,
+    subtotal DECIMAL(15,2) NOT NULL,
+    vat_total DECIMAL(15,2) DEFAULT 0,
+    total DECIMAL(15,2) NOT NULL,
+    status VARCHAR(20) DEFAULT 'draft', -- draft, sent, paid, overdue, cancelled
+    payment_status VARCHAR(20) DEFAULT 'unpaid', -- unpaid, partial, paid
+    peppol_status VARCHAR(20) DEFAULT 'not_sent', -- not_sent, sent, delivered, failed
+    peppol_message_id VARCHAR(255),
+    notes TEXT,
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+
+-- invoice_lines
+CREATE TABLE invoice_lines (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    invoice_id UUID NOT NULL REFERENCES invoices(id) ON DELETE CASCADE,
+    product_id UUID REFERENCES products(id),
+    description TEXT NOT NULL,
+    quantity DECIMAL(15,2) NOT NULL,
+    unit_price DECIMAL(15,2) NOT NULL,
+    tax_rate DECIMAL(5,2) DEFAULT 0,
+    tax_amount DECIMAL(15,2) DEFAULT 0,
+    total DECIMAL(15,2) NOT NULL,
+    sequence INTEGER,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+API Endpoints
+Endpoint	Method	Description	Frontend Usage
+/api/invoices	GET	List with filters	InvoicingView table
+/api/invoices/{id}	GET	Invoice detail with lines	Invoice detail drawer
+/api/invoices	POST	Create invoice	CreateInvoiceModal
+/api/invoices/{id}	PUT	Update invoice	Edit invoice
+/api/invoices/{id}/status	PUT	Update status	Mark paid/overdue
+/api/invoices/{id}/pdf	GET	Generate PDF	PrintStudioView
+/api/invoices/{id}/send	POST	Send via email	InvoicingView
+/api/customers	GET	List customers	Customer selection
+/api/customers	POST	Create customer	CreateInvoiceModal
+/api/customers/{id}	GET	Customer detail	SalesView
+2.4 Peppol APIs (P0)
+Frontend Components: PeppolComplianceView.tsx, InvoicingView.tsx
+
+Models
+sql
+-- peppol_transmissions
+CREATE TABLE peppol_transmissions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id UUID NOT NULL REFERENCES companies(id),
+    invoice_id UUID NOT NULL REFERENCES invoices(id),
+    participant_id VARCHAR(100) NOT NULL,
+    document_type VARCHAR(50) DEFAULT 'invoice', -- invoice, credit_note
+    status VARCHAR(20) DEFAULT 'pending', -- pending, sent, delivered, failed
+    message_id VARCHAR(255),
+    receipt_message VARCHAR(255),
+    ubl_xml TEXT,
+    error_message TEXT,
+    sent_at TIMESTAMP,
+    delivered_at TIMESTAMP,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- peppol_participants (cached from SMP lookups)
+CREATE TABLE peppol_participants (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    participant_id VARCHAR(100) NOT NULL UNIQUE,
+    name VARCHAR(255),
+    country VARCHAR(2),
+    document_capabilities JSONB,
+    last_lookup_at TIMESTAMP,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+API Endpoints
+Endpoint	Method	Description	Frontend Usage
+/api/invoices/{id}/peppol-xml	GET	Generate UBL 2.1 XML	PeppolComplianceView
+/api/invoices/{id}/peppol-send	POST	Send via Peppol	PeppolComplianceView
+/api/invoices/{id}/peppol-status	GET	Check delivery status	PeppolComplianceView
+/api/peppol/lookup	POST	SMP participant lookup	PeppolComplianceView
+/api/peppol/status	GET	Compliance status summary	PeppolComplianceView
+/api/peppol/compliance-matrix	GET	Multi-country mandates	PeppolComplianceView
+/api/peppol/webhook	POST	Incoming delivery status	Webhook
+2.5 Sales & CRM APIs (P0)
+Frontend Components: SalesView.tsx
+
+API Endpoints
+Endpoint	Method	Description	Frontend Usage
+/api/sales-orders	GET	List sales orders	SalesView
+/api/sales-orders	POST	Create sales order	SalesView
+/api/sales-orders/{id}	GET	Sales order detail	SalesView
+/api/sales-orders/{id}/status	PUT	Update status	SalesView
+/api/customers/aging	GET	AR aging report	SalesView
+/api/customers/{id}/balance	GET	Customer balance	SalesView
+2.6 Procurement APIs (P0)
+Frontend Components: ProcurementView.tsx
+
+API Endpoints
+Endpoint	Method	Description	Frontend Usage
+/api/suppliers	GET	List suppliers	ProcurementView
+/api/suppliers	POST	Create supplier	ProcurementView
+/api/purchase-orders	GET	List POs	ProcurementView
+/api/purchase-orders	POST	Create PO	ProcurementView
+/api/purchase-orders/{id}	GET	PO detail	ProcurementView
+/api/suppliers/aging	GET	AP aging report	ProcurementView
+2.7 Manufacturing APIs (P0)
+Frontend Components: ManufacturingView.tsx (9 sub-modules)
+
+Models
+sql
+-- boms
+CREATE TABLE boms (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id UUID NOT NULL REFERENCES companies(id),
+    product_id UUID NOT NULL REFERENCES products(id),
+    name VARCHAR(255) NOT NULL,
+    version VARCHAR(20) NOT NULL,
+    status VARCHAR(20) DEFAULT 'draft',
+    unit VARCHAR(10),
+    quantity DECIMAL(15,2) DEFAULT 1,
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+
+-- bom_components (multi-level)
+CREATE TABLE bom_components (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    bom_id UUID NOT NULL REFERENCES boms(id) ON DELETE CASCADE,
+    component_id UUID NOT NULL REFERENCES products(id),
+    quantity DECIMAL(15,2) NOT NULL,
+    uom VARCHAR(10),
+    scrap_percent DECIMAL(5,2) DEFAULT 0,
+    sequence INTEGER,
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+
+-- work_centers
+CREATE TABLE work_centers (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id UUID NOT NULL REFERENCES companies(id),
+    name VARCHAR(255) NOT NULL,
+    type VARCHAR(50), -- machine, line, station
+    capacity DECIMAL(10,2), -- hours per day
+    utilization DECIMAL(5,2) DEFAULT 0,
+    oee DECIMAL(5,2) DEFAULT 0,
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+
+-- production_orders
+CREATE TABLE production_orders (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id UUID NOT NULL REFERENCES companies(id),
+    order_number VARCHAR(50) NOT NULL UNIQUE,
+    product_id UUID NOT NULL REFERENCES products(id),
+    bom_id UUID REFERENCES boms(id),
+    quantity_planned INTEGER NOT NULL,
+    quantity_completed INTEGER DEFAULT 0,
+    quantity_scrapped INTEGER DEFAULT 0,
+    status VARCHAR(20) DEFAULT 'planned',
+    priority VARCHAR(10) DEFAULT 'normal',
+    start_date DATE,
+    due_date DATE,
+    completed_date DATE,
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+
+-- quality_inspections
+CREATE TABLE quality_inspections (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id UUID NOT NULL REFERENCES companies(id),
+    production_order_id UUID REFERENCES production_orders(id),
+    product_id UUID NOT NULL REFERENCES products(id),
+    inspector_id UUID REFERENCES users(id),
+    inspection_date DATE NOT NULL,
+    result VARCHAR(20) DEFAULT 'pending', -- pass, fail, rework
+    notes TEXT,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- quality_checks
+CREATE TABLE quality_checks (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    inspection_id UUID NOT NULL REFERENCES quality_inspections(id) ON DELETE CASCADE,
+    parameter VARCHAR(255) NOT NULL,
+    expected_value VARCHAR(50),
+    actual_value VARCHAR(50),
+    is_pass BOOLEAN,
+    notes TEXT,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+API Endpoints
+Endpoint	Method	Description	Frontend Usage
+/api/boms	GET	List BOMs	ManufacturingView
+/api/boms/{id}	GET	BOM with components	ManufacturingView
+/api/boms	POST	Create BOM	ManufacturingView
+/api/work-centers	GET	List work centers	ManufacturingView
+/api/work-centers/{id}/oee	GET	OEE metrics	ManufacturingView
+/api/production-orders	GET	List production orders	ManufacturingView
+/api/production-orders	POST	Create production order	ManufacturingView
+/api/production-orders/{id}	GET	Order detail with steps	ManufacturingView
+/api/production-orders/{id}/start	POST	Start production	ManufacturingView
+/api/production-orders/{id}/report	POST	Report completion	ManufacturingView
+/api/production-orders/{id}/complete	POST	Complete order	ManufacturingView
+/api/capacity	GET	Work center capacity	ManufacturingView
+/api/quality/inspections	GET	List inspections	ManufacturingView
+/api/quality/inspections	POST	Create inspection	ManufacturingView
+/api/quality/inspections/{id}/checks	POST	Add quality checks	ManufacturingView
+/api/traceability/{serial}	GET	Full traceability	ManufacturingView
+2.8 Logistics APIs (P1)
+Frontend Components: LogisticsView.tsx (7 sub-modules)
+
+API Endpoints
+Endpoint	Method	Description	Frontend Usage
+/api/warehouses	GET	List warehouses	LogisticsView
+/api/warehouses/{id}/layout	GET	2D layout map	LogisticsView
+/api/stock/receiving	POST	Receive PO	LogisticsView
+/api/pick-lists	GET	List pick lists	LogisticsView
+/api/pick-lists/{id}/complete	POST	Complete picking	LogisticsView
+/api/stock/transfers	GET	List stock transfers	LogisticsView
+/api/stock/transfers	POST	Create transfer	LogisticsView
+/api/carriers	GET	List carriers	LogisticsView
+/api/shipments	GET	List shipments	LogisticsView
+/api/shipments	POST	Create shipment	LogisticsView
+/api/shipments/{id}/tracking	GET	Tracking timeline	LogisticsView
+/api/supply-chain/alerts	GET	Active alerts	LogisticsView
+2.9 Banking APIs (P0)
+Frontend Components: BankingView.tsx
+
+Models
+sql
+-- bank_accounts
+CREATE TABLE bank_accounts (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id UUID NOT NULL REFERENCES companies(id),
+    name VARCHAR(255) NOT NULL,
+    account_number VARCHAR(50) NOT NULL,
+    bank_name VARCHAR(255),
+    currency_id UUID REFERENCES currencies(id),
+    balance DECIMAL(15,2) DEFAULT 0,
+    iban VARCHAR(50),
+    bic VARCHAR(20),
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+
+-- bank_transactions
+CREATE TABLE bank_transactions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id UUID NOT NULL REFERENCES companies(id),
+    bank_account_id UUID NOT NULL REFERENCES bank_accounts(id),
+    transaction_date DATE NOT NULL,
+    description TEXT,
+    amount DECIMAL(15,2) NOT NULL,
+    balance_after DECIMAL(15,2),
+    reference VARCHAR(100),
+    status VARCHAR(20) DEFAULT 'unreconciled', -- unreconciled, reconciled
+    reconciled_with UUID, -- invoice_id or journal_entry_id
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+API Endpoints
+Endpoint	Method	Description	Frontend Usage
+/api/bank-accounts	GET	List accounts	BankingView
+/api/bank-accounts/{id}/transactions	GET	Transaction history	BankingView
+/api/bank-accounts/reconcile	POST	Reconcile transactions	BankingView
+/api/bank-accounts/{id}/reconcile-suggestions	GET	Auto-match suggestions	BankingView
+/api/bank-accounts/import	POST	Import statement file	BankingView
+/api/cash-flow/forecast	GET	90-day cash flow	BankingView
+2.10 Reporting APIs (P0)
+Frontend Components: ReportingView.tsx
+
+API Endpoints
+Endpoint	Method	Description	Frontend Usage
+/api/reports/balance-sheet	GET	Balance sheet	ReportingView
+/api/reports/profit-loss	GET	P&L statement	ReportingView
+/api/reports/trial-balance	GET	Trial balance	ReportingView
+/api/reports/tax-summary	GET	VAT/Tax summary	ReportingView
+/api/reports/{id}/export	GET	Export to Excel/PDF	ReportingView
+2.11 Settings APIs (P0)
+Frontend Components: SettingsView.tsx
+
+API Endpoints
+Endpoint	Method	Description	Frontend Usage
+/api/settings/company	GET	Company profile	SettingsView
+/api/settings/company	PUT	Update company	SettingsView
+/api/settings/compliance	GET	Compliance settings	SettingsView
+/api/settings/compliance	PUT	Update compliance	SettingsView
+/api/users	GET	List users	SettingsView
+/api/users	POST	Create user	SettingsView
+/api/users/{id}	PUT	Update user	SettingsView
+/api/users/{id}	DELETE	Delete user	SettingsView
+/api/settings/currency	GET	Currency settings	SettingsView
+/api/settings/preferences	GET	User preferences	SettingsView
+/api/settings/preferences	PUT	Update preferences	SettingsView
+/api/settings/gdpr/export	GET	Export consent records	SettingsView
+2.12 Document Studio APIs (P1)
+Frontend Components: PrintStudioView.tsx
+
+API Endpoints
+Endpoint	Method	Description	Frontend Usage
+/api/documents/invoice/{id}	GET	Invoice print document	PrintStudioView
+/api/documents/purchase-order/{id}	GET	PO print document	PrintStudioView
+/api/documents/report/{type}	POST	Report print document	PrintStudioView
+/api/documents/layouts	GET	Available layouts	PrintStudioView
+3. AUTHENTICATION IMPLEMENTATION
+Hybrid Approach: Supabase Auth + Flask-Login Sessions
+Since you requested both Option B (Flask-Login) and Option C (Supabase Auth):
+
+Architecture:
+
+text
+┌─────────────────────────────────────────────────────────────────────┐
+│                      AUTHENTICATION FLOW                            │
+│                                                                      │
+│  Frontend ──── Login Request ────▶ Flask API                       │
+│                                              │                       │
+│                                              ▼                       │
+│                                   ┌─────────────────────────────┐ │
+│                                   │ Validate with Supabase Auth  │ │
+│                                   │ (email/password)             │ │
+│                                   └─────────────────────────────┘ │
+│                                              │                       │
+│                                              ▼                       │
+│                                   ┌─────────────────────────────┐ │
+│                                   │ Create Flask Session        │ │
+│                                   │ (session cookie)             │ │
+│                                   └─────────────────────────────┘ │
+│                                              │                       │
+│                                              ▼                       │
+│                                   ┌─────────────────────────────┐ │
+│                                   │ Return JWT for API requests  │ │
+│                                   │ (Supabase JWT)               │ │
+│                                   └─────────────────────────────┘ │
+│                                                                      │
+│  Subsequent API calls use JWT Bearer token                          │
+│  Flask validates using Supabase auth                               │
+└─────────────────────────────────────────────────────────────────────┘
+
+Implementation
+app/auth.py
+
+python
+from flask import Blueprint, request, jsonify, session
+from supabase import create_client
+import os
+from functools import wraps
+
+supabase = create_client(
+    os.getenv('SUPABASE_URL'),
+    os.getenv('SUPABASE_KEY')
+)
+
+auth_bp = Blueprint('auth', __name__, url_prefix='/auth')
+
+@auth_bp.route('/login', methods=['POST'])
+def login():
+    data = request.get_json()
+    email = data.get('email')
+    password = data.get('password')
+    
+    try:
+        # 1. Authenticate with Supabase
+        response = supabase.auth.sign_in_with_password({
+            'email': email,
+            'password': password
+        })
+        
+        user = response.user
+        session['user_id'] = user.id
+        session['user'] = user
+        
+        # 2. Return JWT for API requests
+        return jsonify({
+            'access_token': response.session.access_token,
+            'refresh_token': response.session.refresh_token,
+            'user': {
+                'id': user.id,
+                'email': user.email,
+                'role': user.user_metadata.get('role', 'viewer')
+            }
+        }), 200
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 401
+
+@auth_bp.route('/register', methods=['POST'])
+def register():
+    data = request.get_json()
+    email = data.get('email')
+    password = data.get('password')
+    name = data.get('name')
+    role = data.get('role', 'viewer')
+    
+    try:
+        response = supabase.auth.sign_up({
+            'email': email,
+            'password': password,
+            'options': {
+                'data': {
+                    'name': name,
+                    'role': role
+                }
+            }
+        })
+        
+        return jsonify({
+            'user': response.user
+        }), 201
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
+
+@auth_bp.route('/logout', methods=['POST'])
+def logout():
+    session.clear()
+    return jsonify({'message': 'Logged out'}), 200
+
+@auth_bp.route('/me', methods=['GET'])
+def me():
+    if 'user_id' not in session:
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    # Get fresh user data from Supabase
+    user = supabase.auth.get_user(session.get('access_token'))
+    return jsonify(user.user), 200
+Middleware for JWT Validation:
+
+python
+from flask import request, g, jsonify
+from functools import wraps
+from supabase import create_client
+import os
+
+supabase = create_client(
+    os.getenv('SUPABASE_URL'),
+    os.getenv('SUPABASE_KEY')
+)
+
+def require_auth(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        auth_header = request.headers.get('Authorization')
+        if not auth_header:
+            return jsonify({'error': 'Missing Authorization header'}), 401
+        
+        token = auth_header.replace('Bearer ', '')
+        try:
+            user = supabase.auth.get_user(token)
+            g.user = user.user
+            g.user_id = user.user.id
+            g.role = user.user.user_metadata.get('role', 'viewer')
+        except Exception as e:
+            return jsonify({'error': 'Invalid token: ' + str(e)}), 401
+        
+        return f(*args, **kwargs)
+    return decorated
+
+def require_role(allowed_roles):
+    def decorator(f):
+        @wraps(f)
+        def decorated(*args, **kwargs):
+            if not hasattr(g, 'role'):
+                return jsonify({'error': 'Unauthorized'}), 401
+            if g.role not in allowed_roles and g.role != 'admin':
+                return jsonify({'error': 'Insufficient permissions'}), 403
+            return f(*args, **kwargs)
+        return decorated
+    return decorator
+4. DATABASE SCHEMA COMPLETE
+4.1 Core Tables
+sql
+-- companies
+CREATE TABLE companies (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name VARCHAR(255) NOT NULL,
+    legal_name VARCHAR(255),
+    tax_id VARCHAR(50),
+    vat_id VARCHAR(50),
+    peppol_id VARCHAR(100),
+    address TEXT,
+    city VARCHAR(100),
+    country VARCHAR(2),
+    postal_code VARCHAR(20),
+    phone VARCHAR(50),
+    email VARCHAR(255),
+    website VARCHAR(255),
+    currency_id UUID REFERENCES currencies(id),
+    fiscal_year_start DATE,
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+
+-- users (sync with Supabase Auth)
+CREATE TABLE users (
+    id UUID PRIMARY KEY,
+    company_id UUID REFERENCES companies(id),
+    email VARCHAR(255) NOT NULL UNIQUE,
+    name VARCHAR(255),
+    role VARCHAR(50) DEFAULT 'viewer',
+    is_active BOOLEAN DEFAULT TRUE,
+    preferences JSONB DEFAULT '{}',
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+
+-- currencies
+CREATE TABLE currencies (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    code VARCHAR(3) NOT NULL UNIQUE,
+    name VARCHAR(255) NOT NULL,
+    symbol VARCHAR(10),
+    is_base BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- exchange_rates
+CREATE TABLE exchange_rates (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    from_currency_id UUID REFERENCES currencies(id),
+    to_currency_id UUID REFERENCES currencies(id),
+    rate DECIMAL(15,6) NOT NULL,
+    date DATE NOT NULL,
+    created_at TIMESTAMP DEFAULT NOW(),
+    UNIQUE(from_currency_id, to_currency_id, date)
+);
+4.2 Product/Inventory Tables
+sql
+-- categories
+CREATE TABLE categories (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id UUID REFERENCES companies(id),
+    name VARCHAR(255) NOT NULL,
+    parent_id UUID REFERENCES categories(id),
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+
+-- products
+CREATE TABLE products (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id UUID NOT NULL REFERENCES companies(id),
+    category_id UUID REFERENCES categories(id),
+    sku VARCHAR(50) NOT NULL,
+    name VARCHAR(255) NOT NULL,
+    description TEXT,
+    uom VARCHAR(10) DEFAULT 'pc',
+    unit_price DECIMAL(15,2),
+    cost DECIMAL(15,2),
+    stock_quantity DECIMAL(15,2) DEFAULT 0,
+    reorder_level DECIMAL(15,2) DEFAULT 0,
+    max_stock DECIMAL(15,2),
+    is_active BOOLEAN DEFAULT TRUE,
+    is_tracked BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+
+-- warehouses
+CREATE TABLE warehouses (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id UUID NOT NULL REFERENCES companies(id),
+    name VARCHAR(255) NOT NULL,
+    code VARCHAR(20) NOT NULL,
+    address TEXT,
+    city VARCHAR(100),
+    country VARCHAR(2),
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+
+-- locations (bin/shelf)
+CREATE TABLE locations (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    warehouse_id UUID NOT NULL REFERENCES warehouses(id),
+    code VARCHAR(50) NOT NULL,
+    zone VARCHAR(50),
+    aisle VARCHAR(50),
+    shelf VARCHAR(50),
+    bin VARCHAR(50),
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW(),
+    UNIQUE(warehouse_id, code)
+);
+
+-- stock_balances
+CREATE TABLE stock_balances (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    product_id UUID NOT NULL REFERENCES products(id),
+    warehouse_id UUID NOT NULL REFERENCES warehouses(id),
+    location_id UUID REFERENCES locations(id),
+    quantity DECIMAL(15,2) NOT NULL DEFAULT 0,
+    updated_at TIMESTAMP DEFAULT NOW(),
+    UNIQUE(product_id, warehouse_id, location_id)
+);
+
+-- stock_movements
+CREATE TABLE stock_movements (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    product_id UUID NOT NULL REFERENCES products(id),
+    warehouse_id UUID NOT NULL REFERENCES warehouses(id),
+    location_id UUID REFERENCES locations(id),
+    movement_type VARCHAR(20) NOT NULL, -- receive, pick, transfer, adjust
+    quantity DECIMAL(15,2) NOT NULL,
+    reference_type VARCHAR(50), -- po, so, transfer, adjustment
+    reference_id UUID,
+    from_location_id UUID REFERENCES locations(id),
+    to_location_id UUID REFERENCES locations(id),
+    notes TEXT,
+    created_by UUID REFERENCES users(id),
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- serial_numbers
+CREATE TABLE serial_numbers (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    product_id UUID NOT NULL REFERENCES products(id),
+    serial_number VARCHAR(100) NOT NULL UNIQUE,
+    lot_number VARCHAR(100),
+    manufacturing_date DATE,
+    expiry_date DATE,
+    current_warehouse_id UUID REFERENCES warehouses(id),
+    current_location_id UUID REFERENCES locations(id),
+    status VARCHAR(20) DEFAULT 'in_stock', -- in_stock, in_production, shipped, scrapped
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+4.3 Manufacturing Tables (Extended)
+sql
+-- routings
+CREATE TABLE routings (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id UUID NOT NULL REFERENCES companies(id),
+    name VARCHAR(255) NOT NULL,
+    product_id UUID NOT NULL REFERENCES products(id),
+    version VARCHAR(20) NOT NULL,
+    status VARCHAR(20) DEFAULT 'draft',
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+
+-- routing_steps
+CREATE TABLE routing_steps (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    routing_id UUID NOT NULL REFERENCES routings(id) ON DELETE CASCADE,
+    work_center_id UUID NOT NULL REFERENCES work_centers(id),
+    operation_name VARCHAR(255) NOT NULL,
+    sequence INTEGER NOT NULL,
+    setup_time DECIMAL(10,2), -- hours
+    run_time DECIMAL(10,2), -- hours per unit
+    wait_time DECIMAL(10,2),
+    move_time DECIMAL(10,2),
+    notes TEXT,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- production_order_steps
+CREATE TABLE production_order_steps (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    production_order_id UUID NOT NULL REFERENCES production_orders(id) ON DELETE CASCADE,
+    routing_step_id UUID NOT NULL REFERENCES routing_steps(id),
+    work_center_id UUID NOT NULL REFERENCES work_centers(id),
+    status VARCHAR(20) DEFAULT 'pending', -- pending, in_progress, completed, rejected
+    start_time TIMESTAMP,
+    end_time TIMESTAMP,
+    quantity_completed INTEGER DEFAULT 0,
+    quantity_scrapped INTEGER DEFAULT 0,
+    completed_by UUID REFERENCES users(id),
+    notes TEXT,
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+5. IMPLEMENTATION ROADMAP
+Phase 1: P0 Modules (2-3 Weeks)
+Week	Modules	Deliverables
+Week 1	Setup + Core	Flask app, Supabase integration, Authentication, Base models, Accounts, Journal Entries
+Week 1-2	Invoicing + Peppol	Invoice CRUD, Customer management, UBL generation, Peppol API integration
+Week 2	Dashboard + Banking	KPI metrics, Cash flow, Bank reconciliation
+Week 3	Manufacturing (Basic)	BOM, Production Orders, Work Centers
+Week 3	Procurement + Sales	Suppliers, POs, Sales Orders, Aging reports
+Phase 2: P1 Modules (2 Weeks)
+Week	Modules	Deliverables
+Week 4	Manufacturing (Advanced)	Quality inspections, Traceability, Capacity planning
+Week 4-5	Logistics	Warehouse management, Receiving, Picking, Shipments
+Week 5	Document Studio	PDF generation, Layouts, Print templates
+Phase 3: P2-P3 Modules (Future)
+Modules	Deliverables
+Advanced Logistics	TMS, Route optimization, Carrier integration
+AI Features	Demand forecasting, Supply chain alerts
+Advanced Reporting	Custom reports, Scheduled reports
+6. DEPLOYMENT
+6.1 Render Deployment
+Procfile
+
+text
+web: gunicorn wsgi:app
+worker: celery -A app.celery worker --loglevel=info
+render.yaml
+
+yaml
+services:
+  - type: web
+    name: tenlos-erp-backend
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn wsgi:app
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: tenlos-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          name: tenlos-redis
+          type: redis
+          property: connectionString
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_KEY
+        sync: false
+6.2 Supabase Setup
+Create Supabase project
+
+Enable Auth (email/password)
+
+Run migrations via Alembic
+
+Set up RLS policies
+
+6.3 Environment Variables
+bash
+# Flask
+SECRET_KEY=your_secret_key
+DEBUG=False
+
+# Database (Supabase)
+DATABASE_URL=postgresql://user:pass@host:5432/db
+
+# Supabase Auth
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_KEY=your_supabase_anon_key
+
+# Peppol
+PEPPOL_ACCESS_POINT=https://your-peppol-gateway.com
+PEPPOL_API_KEY=your_peppol_api_key
+
+# Redis (for Celery)
+REDIS_URL=redis://:password@host:6379
+
+# CORS
+CORS_ORIGINS=https://your-frontend.com
+
+# Email
+SMTP_HOST=smtp.sendgrid.net
+SMTP_PORT=587
+SMTP_USER=apikey
+SMTP_PASSWORD=your_sendgrid_key
+7. NEXT STEPS
+Step	Action
+1	Database Setup: Run Supabase setup with the provided SQL schemas
+2	Flask Base: Create Flask app with Supabase auth integration
+3	Core Models: Implement Accounts, Journal Entries, Customers, Invoices
+4	API Endpoints: Build P0 APIs (Accounting, Invoicing, Peppol)
+5	Integration: Connect frontend to backend APIs
+6	Testing: Test all P0 features
+7	Deploy: Deploy to Render
+8. FILES TO CREATE (Backend)
+text
+backend/
+├── app/
+│   ├── __init__.py
+│   ├── config.py
+│   ├── extensions.py
+│   ├── auth.py                       # Supabase + Flask-Login hybrid
+│   ├── models/
+│   │   ├── accounting.py
+│   │   ├── invoicing.py
+│   │   ├── manufacturing.py
+│   │   ├── inventory.py
+│   │   ├── logistics.py
+│   │   ├── sales.py
+│   │   └── procurement.py
+│   ├── api/
+│   │   ├── accounting.py
+│   │   ├── invoicing.py
+│   │   ├── peppol.py
+│   │   ├── manufacturing.py
+│   │   ├── inventory.py
+│   │   ├── logistics.py
+│   │   ├── sales.py
+│   │   ├── procurement.py
+│   │   ├── banking.py
+│   │   ├── reporting.py
+│   │   ├── dashboard.py
+│   │   └── settings.py
+│   ├── services/
+│   │   ├── accounting_service.py
+│   │   ├── peppol_service.py
+│   │   ├── manufacturing_service.py
+│   │   └── reporting_service.py
+│   ├── middleware/
+│   │   ├── auth.py
+│   │   └── logging.py
+│   ├── utils/
+│   │   ├── ubl_generator.py         # Peppol UBL
+│   │   ├── pdf_generator.py
+│   │   └── excel_generator.py
+│   └── celery.py
+├── migrations/                       # Alembic
+├── requirements.txt
+├── .env
+├── Procfile
+└── wsgi.py
