@@ -1,0 +1,195 @@
+Here is the complete folder and file structure of the Tenlos ERP codebase, along with what each file is responsible for and the components/utilities contained within them:
+Project Directory Structure Overview
+code
+Text
+├── app/
+│   ├── globals.css
+│   ├── layout.tsx
+│   └── page.tsx
+├── components/
+│   ├── layout/
+│   │   ├── CommandPalette.tsx
+│   │   ├── CookieConsent.tsx
+│   │   ├── Header.tsx
+│   │   ├── KeyboardShortcutsModal.tsx
+│   │   └── Sidebar.tsx
+│   ├── modals/
+│   │   ├── CreateInvoiceModal.tsx
+│   │   ├── CreateJournalModal.tsx
+│   │   └── DrillDownModal.tsx
+│   └── views/
+│       ├── BankingView.tsx
+│       ├── DashboardView.tsx
+│       ├── FinancialsView.tsx
+│       ├── InvoicingView.tsx
+│       ├── LogisticsView.tsx
+│       ├── ManufacturingView.tsx
+│       ├── PeppolComplianceView.tsx
+│       ├── PrintStudioView.tsx
+│       ├── ProcurementView.tsx
+│       ├── ReportingView.tsx
+│       ├── SalesView.tsx
+│       └── SettingsView.tsx
+├── hooks/
+│   └── use-mobile.ts
+├── lib/
+│   ├── data/
+│   │   └── mock-data.ts
+│   ├── i18n/
+│   │   └── translations.ts
+│   ├── stores/
+│   │   └── erp-store.ts
+│   ├── types/
+│   │   └── erp.ts
+│   ├── utils/
+│   │   ├── formatters.ts
+│   │   └── peppol.ts
+│   └── utils.ts
+├── public/
+│   └── assets/
+├── .env.example
+├── eslint.config.mjs
+├── metadata.json
+├── next.config.ts
+├── package.json
+├── postcss.config.mjs
+└── tsconfig.json
+Detailed Directory & File Breakdown
+1. /app — Next.js Application Core & Entry Point
+app/globals.css
+Responsibility: Global styling setup including Tailwind CSS imports (@import "tailwindcss"), custom scrollbar utility classes, print CSS media queries (@media print), and custom keyframe animations.
+app/layout.tsx
+Responsibility: Root Next.js layout component. Defines application meta tags, OpenGraph data, viewport settings, and the base HTML <html> / <body> wrappers.
+app/page.tsx
+Responsibility: Main application shell and primary router orchestrator.
+Components & Functionality:
+Houses the persistent layout grid: Sidebar, top Header, and active view renderer.
+Dynamically renders views based on activeTab from the global Zustand store (dashboard, financials, invoicing, peppol, sales, procurement, manufacturing, logistics, banking, reports, print_studio, settings).
+Mounts global overlay dialogs: CommandPalette, CreateInvoiceModal, CreateJournalModal, DrillDownModal, KeyboardShortcutsModal, and CookieConsent.
+2. /components/layout — Shell & Navigation Components
+CommandPalette.tsx
+Responsibility: Global ⌘K / Ctrl+K quick-search modal for lightning-fast command dispatching, navigation jumps, data creation shortcuts, currency conversions, and entity lookups.
+CookieConsent.tsx
+Responsibility: GDPR-compliant cookie and tracking consent banner with granular preferences for analytics, marketing, and essential storage.
+Header.tsx
+Responsibility: Global top header bar.
+Components & Functionality:
+Active company entity selector (multi-entity dropdown).
+Global currency switcher (USD, EUR, GBP, SGD, JPY, CAD, AUD, CHF) with live conversion state.
+Language / locale picker (English, German, French, Spanish, Japanese).
+Quick search trigger, notification badge dropdown, quick-action shortcut menu (+ Invoice, + Journal), and user profile avatar.
+KeyboardShortcutsModal.tsx
+Responsibility: Modal reference cheat-sheet (? key) showing all registered global keyboard shortcuts (navigation, search, creation commands).
+Sidebar.tsx
+Responsibility: Collapsible vertical sidebar navigation with smooth accordion sub-groups.
+Components & Functionality:
+Brand logo with collapse transition guards to prevent clipping.
+Categorized navigation items with active states, live dynamic badges (e.g., overdue invoices, pending POs, active supply chain alerts), and animated sub-item accordions powered by motion/react.
+3. /components/modals — Interactive Form & Audit Modals
+CreateInvoiceModal.tsx
+Responsibility: Dynamic multi-line invoice builder.
+Components & Functionality: Customer selection, invoice date/due date picker, dynamic line items (quantity, unit price, tax rate), real-time subtotal/VAT calculation, payment terms, currency selector, and UBL Peppol profile attachment.
+CreateJournalModal.tsx
+Responsibility: Double-entry general ledger journal entry creator.
+Components & Functionality: Line-by-line debit and credit entry grid, chart of accounts picker, and automatic real-time balance validation (enforces Total Debits === Total Credits).
+DrillDownModal.tsx
+Responsibility: Financial audit inspector modal.
+Components & Functionality: Triggered by clicking any account in the Balance Sheet or P&L to inspect underlying journal vouchers, transaction dates, source reference documents, and debit/credit history.
+4. /components/views — Domain Modules & Business Logic
+DashboardView.tsx
+Responsibility: High-level executive overview.
+Components & Functionality: KPI metric cards (revenue, net profit margin, cash balance, accounts receivable), interactive cash-flow and revenue trend charts (recharts), recent transaction feed, Peppol invoice pipeline overview, and quick-action widgets.
+FinancialsView.tsx
+Responsibility: Core double-entry general ledger & accounting engine.
+Components & Functionality:
+Chart of Accounts (COA) directory with category tags.
+Journal Entries audit register with balanced debit/credit lines.
+Dynamic real-time Trial Balance with search and period filters.
+InvoicingView.tsx
+Responsibility: Sales invoicing, AR management, and billing lifecycle.
+Components & Functionality: Invoices table with status badges (paid, overdue, draft, pending), invoice detail drawer, PDF/print preview trigger, payment settlement logging, and direct Peppol transmission triggers.
+PeppolComplianceView.tsx
+Responsibility: E-Invoicing compliance center.
+Components & Functionality:
+Real-time Peppol BIS Billing 3.0 (UBL 2.1) XML generator and syntax highlighter.
+Directory SMP (Service Metadata Publisher) participant lookup tool.
+Interactive AS4 access point network transmission simulator.
+Multi-country compliance matrix & mandate status (e.g., France Chorus Pro, Germany ZUGFeRD/XRechnung, Italy SDI, Singapore InvoiceNow, Poland KSeF).
+SalesView.tsx
+Responsibility: Customer CRM and Sales Orders.
+Components & Functionality: Customer directory with credit limits and outstanding balances, Sales Order pipeline (Draft, Confirmed, Shipped, Invoiced), and Accounts Receivable (AR) aging analysis buckets (Current, 1-30d, 31-60d, 90d+).
+ProcurementView.tsx
+Responsibility: Vendor directory and Accounts Payable (AP).
+Components & Functionality: Supplier management with Net-payment terms, Purchase Orders (POs) tracking with approval workflows, and Accounts Payable aging report.
+ManufacturingView.tsx
+Responsibility: Shop-floor operations and Manufacturing Execution System (MES).
+Components & Functionality (9 sub-modules):
+Bill of Materials (BOM): Multi-level assembly tree and rolled-up component costing.
+Work Centers & OEE: Machine telemetry, utilization, availability, and OEE percentages.
+Production Orders: Batch scheduling, routing steps, and status dispatching.
+Capacity & Scheduling: Work center shift load vs. available capacity charts.
+Shop Floor Operator Station: Touch-friendly terminal for recording completed output, scrap, and downtime.
+WIP Costing: Stage-by-stage work-in-progress cost valuation.
+Genealogy & Lot Recall: Component traceability from raw material supplier heat batches to customer deliveries.
+Quality Control (QA): In-process and final metrology inspection sheets.
+AI Yield Optimizer: Predictive scrap-reduction analytics and parameter tuning suggestions.
+LogisticsView.tsx
+Responsibility: Warehousing, inventory distribution, and freight fulfillment.
+Components & Functionality (7 sub-modules):
+Warehouse & 2D Layout: Distribution center monitoring with interactive 2D bay/aisle grid occupancy maps.
+Receiving & Wave Picking: Inbound PO putaway confirmations and barcode-guided pick lists.
+Stock Transfers: Multi-warehouse inter-facility inventory movements and in-transit tracking.
+Carriers & SLAs: Freight carrier performance metrics, on-time delivery rates, and rate tables.
+Shipments & Tracking: Real-time parcel and freight tracking timeline with milestone logs.
+Route Optimizer & Green Fleet: Multi-stop vehicle routing, fuel optimization, and carbon footprint metrics.
+Supply Chain Alerts: Reorder-point notifications, stockout warnings, and disruption risk monitors.
+BankingView.tsx
+Responsibility: Treasury, bank feeds, and cash management.
+Components & Functionality: Multi-currency bank account cards, interactive bank reconciliation grid (matching GL entries to bank statements), and 90-day predictive cash runway projection chart.
+ReportingView.tsx
+Responsibility: Statutory financial reports and multi-period analytics.
+Components & Functionality:
+Interactive Balance Sheet (Assets, Liabilities, Equity) with drill-down audit capabilities.
+Interactive Profit & Loss (P&L) statement with gross margin and EBITDA breakdowns.
+Tax / VAT summary reports with tax box allocations.
+CSV / Excel data export engines.
+PrintStudioView.tsx
+Responsibility: Document design, templating, and print generation.
+Components & Functionality: Live document canvas with 4 enterprise styling templates (Modern, Classic, Minimalist, Corporate), dynamic SEPA/EPC QR-code generation for European bank apps, and 1-click A4 / US-Letter PDF and print generation.
+SettingsView.tsx
+Responsibility: System preferences, entity configuration, and compliance setup.
+Components & Functionality: Multi-entity company master data, tax registration IDs (VAT, GST, Peppol Endpoint ID), default base currency, GDPR consent records & audit export, and user security settings.
+5. /hooks — Custom React Hooks
+use-mobile.ts
+Responsibility: Responsive screen-width detector hook to detect mobile viewports (< 768px) for responsive layout adjustments.
+6. /lib — Data Stores, Types, i18n & Core Utilities
+lib/stores/erp-store.ts
+Responsibility: Global Zustand state management store. Holds reactive state for:
+Active navigation tabs & sub-tabs.
+Selected company entity, base currency, and current locale.
+In-memory databases of Invoices, Journals, Accounts, Customers, Suppliers, Bank Accounts, Bank Transactions, Manufacturing Orders, BOMs, Work Centers, Warehouses, Shipments, and Supply Chain Alerts.
+Action creators for CRUD operations, status updates, drill-downs, and modal visibility toggles.
+lib/types/erp.ts
+Responsibility: Central TypeScript type definitions and interfaces for all domain entities:
+Accounting: Account, JournalEntry, JournalLine, TrialBalanceRow, FinancialStatementItem.
+Invoicing: Invoice, InvoiceItem, Customer, Supplier, PaymentTerms, Currency.
+Peppol: PeppolTransmission, PeppolParticipant, TaxScheme.
+Manufacturing: BOMItem, WorkCenter, ProductionOrder, QualityInspection, TraceabilityRecord.
+Logistics: WarehouseLocation, StockTransfer, Carrier, Shipment, SupplyChainAlert.
+lib/data/mock-data.ts
+Responsibility: Enterprise-grade initial seed dataset covering multi-currency invoices, chart of accounts, production orders, warehouses, suppliers, customers, and bank transactions.
+lib/i18n/translations.ts
+Responsibility: Multilingual translation dictionary supporting English (en), German (de), French (fr), Spanish (es), and Japanese (ja) for navigation, actions, and labels.
+lib/utils/peppol.ts
+Responsibility: Peppol BIS Billing 3.0 / UBL 2.1 XML generator function that builds valid, formatted e-invoice XML files from structured invoice records.
+lib/utils/formatters.ts
+Responsibility: Formatting utilities for multi-currency conversion, monetary string formatting, date formatting, and percentage computations.
+lib/utils.ts
+Responsibility: General helper utilities, including cn() (clsx + tailwind-merge helper) for combining Tailwind CSS class names safely.
+7. Root Configuration Files
+package.json: NPM package manifest listing dependencies (react, next, zustand, lucide-react, motion, recharts, clsx, tailwind-merge, etc.).
+tsconfig.json: TypeScript compiler configuration and path aliases (@/*).
+next.config.ts: Next.js framework configuration options.
+postcss.config.mjs: PostCSS setup integrating Tailwind CSS v4 (@tailwindcss/postcss).
+metadata.json: Application metadata (name, description, permissions, server capabilities).
+.env.example: Environment variable declaration template.
